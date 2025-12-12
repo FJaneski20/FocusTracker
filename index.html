@@ -1,829 +1,358 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Locked-In — Focus Tracker (Enhanced)</title>
+<meta charset="UTF-8">
+<title>Focus Tracker HUD</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Poppins font -->
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;800&display=swap" rel="stylesheet">
+<style>
+/* -------------------------
+   GLOBAL STYLE + HUD COLORS
+   ------------------------- */
+body {
+    font-family: 'Orbitron', sans-serif;
+    background: radial-gradient(circle at center, #04121f, #000000);
+    color: #d6f3ff;
+    margin: 0;
+    overflow: hidden;
+}
 
-  <!-- Teachable Machine libraries -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
+h1, h2 {
+    font-family: 'Orbitron', sans-serif;
+    letter-spacing: 2px;
+}
 
-  <style>
-    :root{
-      --bg:#05060a;
-      --panel:#0b0d12;
-      --muted:#97a0b6;
-      --focus-blue:#17a2ff;
-      --distracted-red:#ff3b3b;
-      --break-green:#2be37b;
-      --glass: rgba(255,255,255,0.03);
-      --hud-radius: 12px;
-      --accent: var(--focus-blue);
-      color-scheme: dark;
-    }
-    html,body{
-      height:100%;
-      margin:0;
-      font-family:"Poppins",system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
-      background:
-        radial-gradient(1200px 600px at 10% 10%, rgba(23,162,255,0.03), transparent 8%),
-        radial-gradient(900px 400px at 90% 90%, rgba(43,227,123,0.02), transparent 10%),
-        linear-gradient(180deg, #05060a, #020205);
-      color:#e7f3ff;
-      -webkit-font-smoothing:antialiased;
-      -moz-osx-font-smoothing:grayscale;
-      overflow:auto;
-    }
+a, button, input {
+    font-family: inherit;
+}
 
-    /* subtle animated parallax shapes */
-    .parallax {
-      position:fixed; inset:0; pointer-events:none; z-index:0;
-      background-image:
-        radial-gradient(circle at 8% 12%, rgba(23,162,255,0.04), transparent 8%),
-        radial-gradient(circle at 92% 88%, rgba(43,227,123,0.03), transparent 8%);
-      mix-blend-mode: screen; opacity:0.9;
-      animation: drift 20s linear infinite;
-    }
-    @keyframes drift {
-      0%{ transform: translateY(0px) rotate(0deg); }
-      50%{ transform: translateY(-10px) rotate(1deg); }
-      100%{ transform: translateY(0px) rotate(0deg); }
-    }
+/* HUD glow */
+.hud-glow {
+    text-shadow: 0 0 10px #39eaff, 0 0 20px #39eaff;
+}
 
-    .container{
-      position:relative;
-      max-width:1180px;
-      margin:40px auto;
-      padding:24px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.014), rgba(255,255,255,0.01));
-      border-radius:16px;
-      box-shadow: 0 12px 60px rgba(0,0,0,0.6);
-      display:grid;
-      grid-template-columns: 380px 1fr;
-      gap:20px;
-      z-index:1;
-      overflow:visible;
-    }
+/* -------------------------
+   STARTUP OVERLAY ANIMATION
+   ------------------------- */
+#startup-screen {
+    position: fixed;
+    inset: 0;
+    background: black;
+    color: #39eaff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    z-index: 9999;
+    animation: fadeOut 1.8s ease 2.6s forwards;
+}
 
-    /* Header animated ring */
-    .logo-lock { width:64px;height:64px;border-radius:12px;display:grid;place-items:center;
-      background:linear-gradient(135deg,#07080b 0%, #0f1114 100%);
-      border:1px solid rgba(255,255,255,0.03);
-      box-shadow: 0 10px 40px rgba(0,0,0,0.6), inset 0 -6px 12px rgba(255,255,255,0.02);
-      position:relative;
-    }
-    .logo-lock .ring {
-      position:absolute; inset:-14px; border-radius:50%;
-      background: conic-gradient(from 180deg at 50% 50%, rgba(23,162,255,0.12), rgba(43,227,123,0.06), rgba(255,59,59,0.08));
-      filter: blur(22px); opacity:0.9; transform:rotate(0deg);
-      animation: spin 12s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeOut {
+    to { opacity: 0; pointer-events: none; }
+}
 
-    .title { display:flex; gap:14px; align-items:center; }
+#boot-text {
+    border-right: 3px solid #39eaff;
+    white-space: nowrap;
+    overflow: hidden;
+    width: 0;
+    animation: typing 2.6s steps(40) forwards;
+}
 
-    .hud {
-      background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0.008));
-      border-radius:12px;
-      padding:18px;
-      border: 1px solid rgba(255,255,255,0.02);
-      position:relative;
-    }
+@keyframes typing {
+    from { width: 0; }
+    to { width: 440px; }
+}
 
-    .status { display:flex; gap:12px; align-items:center; padding:12px; border-radius:10px; background:linear-gradient(90deg, rgba(255,255,255,0.01), rgba(255,255,255,0.015)); }
-    .indicator { width:96px;height:96px;border-radius:14px;display:grid;place-items:center; background:linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.02); transition:transform .24s ease, box-shadow .24s ease, border-color .24s ease; }
-    .indicator svg { width:54px;height:54px; filter:drop-shadow(0 6px 20px rgba(0,0,0,0.6)); }
+/* -------------------------
+   MAIN HUD LAYOUT
+   ------------------------- */
+#hud-wrapper {
+    display: flex;
+    padding: 20px;
+    gap: 20px;
+}
 
-    .meta .state { font-weight:800; font-size:1.12rem; letter-spacing:0.6px; }
-    .meta .desc { color:var(--muted); margin-top:6px; font-size:0.86rem; }
+#left-panel, #right-panel {
+    background: rgba(0, 37, 58, 0.35);
+    padding: 20px;
+    border: 2px solid #1ab6ff;
+    border-radius: 10px;
+    box-shadow: 0 0 10px #1ab6ff55;
+    backdrop-filter: blur(4px);
+}
 
-    /* Canvas and controls */
-    .camera { margin-top:14px; border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:10px; align-items:center; background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02)); border:1px solid rgba(255,255,255,0.02); }
-    #canvas { width:320px; height:320px; border-radius:10px; background:#000; border:1px solid rgba(255,255,255,0.03); }
+/* camera HUD box */
+#camera-box {
+    border: 2px solid #00ffb3;
+    box-shadow: 0 0 10px #00ffb388;
+    padding: 10px;
+    text-align: center;
+}
 
-    .controls { display:flex; gap:10px; align-items:center; margin-top:6px; }
-    .btn { padding:10px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.03); background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); cursor:pointer; font-weight:700; color:#e6f2ff; }
-    .btn.primary { background: linear-gradient(90deg, rgba(23,162,255,0.18), rgba(23,162,255,0.12)); box-shadow: 0 8px 40px rgba(23,162,255,0.06); }
+/* prediction HUD */
+#label-container div {
+    margin-top: 6px;
+    padding: 3px 8px;
+    background: rgba(0,0,0,0.3);
+    border-left: 3px solid #39eaff;
+    font-size: 14px;
+    border-radius: 4px;
+}
 
-    /* right column */
-    .content { display:flex; flex-direction:column; gap:12px; }
-    .card { background:rgba(255,255,255,0.01); padding:14px; border-radius:12px; border:1px solid rgba(255,255,255,0.02); }
-    .card h2 { margin:0; font-size:1rem; font-weight:700; }
-    .card p { margin:8px 0; color:var(--muted); line-height:1.4; }
+/* sliders */
+input[type="range"] {
+    width: 100%;
+}
 
-    /* label container */
-    #label-container { display:flex; flex-direction:column; gap:6px; width:100%; max-width:320px; font-weight:600; color:var(--muted); margin-top:6px; }
-    #label-container div { font-size:0.86rem; padding:8px; border-radius:8px; background: rgba(255,255,255,0.01); border:1px solid rgba(255,255,255,0.02); }
+/* Pomodoro Timer */
+#timer-display {
+    font-size: 32px;
+    margin: 10px 0;
+    color: #00ffb3;
+    text-shadow: 0 0 10px #00ffb3;
+}
 
-    /* mini elements */
-    .mini-row { display:flex; gap:10px; align-items:center; margin-top:8px; }
-    .mini { padding:8px; border-radius:8px; background:rgba(255,255,255,0.01); font-weight:700; color:var(--muted); flex:1; text-align:center; }
+/* distraction log */
+#log-box {
+    max-height: 150px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.2);
+    padding: 10px;
+    border: 1px solid #39eaff55;
+    border-radius: 5px;
+}
 
-    /* progress bars & rings */
-    .progress { height:10px; background: rgba(255,255,255,0.02); border-radius:999px; overflow:hidden; }
-    .progress > .bar { height:100%; width:0%; background:var(--accent); transition:width 400ms linear; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
+/* buttons */
+button {
+    background: #1ab6ff;
+    border: none;
+    color: black;
+    padding: 10px 15px;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 6px;
+    margin-top: 6px;
+    transition: 0.2s;
+}
 
-    .ring-wrap { width:80px;height:80px; position:relative; display:grid; place-items:center; }
-    .ring-svg { transform: rotate(-90deg); width:80px;height:80px; }
-    .ring-label { position:absolute; font-weight:800; font-size:0.85rem; }
-
-    /* slider */
-    .slider-row { display:flex; gap:12px; align-items:center; margin-top:10px; }
-    input[type="range"]{ width:180px; }
-
-    /* log table */
-    table { width:100%; border-collapse:collapse; font-size:0.9rem; }
-    th,td{ padding:8px 6px; text-align:left; border-bottom:1px dashed rgba(255,255,255,0.03); color:var(--muted); }
-    th{ font-weight:800; color:#fff; }
-
-    /* small responsive */
-    @media (max-width:980px){
-      .container { grid-template-columns: 1fr; padding:16px; margin:18px; }
-      #canvas { width:260px; height:260px; }
-      .indicator { width:76px; height:76px; }
-    }
-  </style>
+button:hover {
+    background: #39eaff;
+}
+</style>
 </head>
 <body>
-  <div class="parallax" aria-hidden="true"></div>
 
-  <div class="container" id="root">
-    <!-- LEFT HUD -->
-    <div class="hud" role="region" aria-label="Focus HUD">
-      <div class="title">
-        <div class="logo-lock" aria-hidden="true">
-          <div class="ring" aria-hidden="true"></div>
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" style="z-index:2">
-            <rect x="3" y="11" width="18" height="10" rx="2" ry="2" stroke="white" stroke-opacity="0.9" stroke-width="1.2" fill="none"></rect>
-            <path d="M7 11V8a5 5 0 0 1 10 0v3" stroke="white" stroke-opacity="0.9" stroke-width="1.2" fill="none"></path>
-          </svg>
+<!-- -------------------------
+     STARTUP BOOT SEQUENCE
+     ------------------------- -->
+<div id="startup-screen">
+    <div id="boot-text">
+        INITIALIZING FOCUS TRACKER SYSTEM... <br>
+        LOADING POSE MODEL... <br>
+        SYNCING HUD MODULES... <br>
+        SYSTEM ONLINE.
+    </div>
+</div>
+
+<!-- -------------------------
+     MAIN CONTENT + TITLE
+     ------------------------- -->
+<h1 class="hud-glow" style="text-align:center; margin-top:20px;">Focus Tracker HUD</h1>
+<p style="text-align:center; max-width:700px; margin:auto;">
+A gaming-HUD–themed posture & attention monitor that detects **Focus**, **Distraction**,  
+and **Break Mode** using Google’s Teachable Machine Pose Model.
+</p>
+
+<!-- -------------------------
+     HUD LAYOUT (horizontal)
+     ------------------------- -->
+<div id="hud-wrapper">
+
+    <!-- LEFT PANEL – CAMERA, MODEL, CONTROLS -->
+    <div id="left-panel" style="flex: 1;">
+        <h2 class="hud-glow">Live Tracker</h2>
+
+        <button onclick="init()">Start Camera</button>
+
+        <div id="camera-box">
+            <canvas id="canvas"></canvas>
         </div>
-        <div>
-          <h1 style="margin:0;font-size:1.18rem;">Locked-In — Focus Tracker</h1>
-          <p style="margin:0;color:var(--muted);font-size:0.86rem;">Real-time posture & gaze tracker — stay locked on your work.</p>
-        </div>
-      </div>
 
-      <div class="status" style="margin-top:12px;">
-        <div class="indicator indicator-focused" id="indicator" aria-hidden="true">
-          <!-- state SVG will update color -->
-          <svg id="stateSvg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="11" width="18" height="10" rx="2" ry="2" style="fill: none;"></rect>
-            <path d="M7 11V8a5 5 0 0 1 10 0v3"></path>
-          </svg>
-        </div>
-        <div class="meta">
-          <div class="state" id="stateText">READY</div>
-          <div class="desc" id="stateDesc">Click Start and allow camera access.</div>
+        <h3>Sensitivity</h3>
+        <input type="range" id="sensitivity-slider" min="0.1" max="0.9" value="0.5" step="0.05">
+        <p>Current: <span id="sensitivity-read">0.5</span></p>
 
-          <div class="mini-row" style="margin-top:8px;">
-            <div class="mini" id="distractedCount">Distracted events: 0</div>
-            <div class="mini" id="sessionTime">Session: 0s</div>
-          </div>
-
-          <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
-            <div class="ring-wrap" aria-hidden="true">
-              <svg class="ring-svg" viewBox="0 0 36 36">
-                <path stroke="rgba(255,255,255,0.06)" stroke-width="3" fill="none" d="M18 2.0845
-                    a 15.9155 15.9155 0 0 1 0 31.831
-                    a 15.9155 15.9155 0 0 1 0 -31.831"/>
-                <path id="ringPath" stroke="var(--accent)" stroke-width="3" fill="none" stroke-dasharray="100,100" d="M18 2.0845
-                    a 15.9155 15.9155 0 0 1 0 31.831
-                    a 15.9155 15.9155 0 0 1 0 -31.831"/>
-              </svg>
-              <div class="ring-label" id="ringLabel">0%</div>
-            </div>
-            <div style="flex:1;">
-              <div style="font-weight:700;font-size:0.84rem;">Focus Progress</div>
-              <div class="progress" style="margin-top:8px;"><div class="bar" id="focusBar" style="width:0%"></div></div>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <div class="camera" style="margin-top:14px;">
-        <canvas id="canvas"></canvas>
+        <h3>Status</h3>
         <div id="label-container"></div>
-
-        <div class="controls">
-          <button class="btn primary" id="startBtn">Start</button>
-          <button class="btn" id="stopBtn" disabled>Stop</button>
-          <button class="btn" id="muteBtn">🔊 Alert: On</button>
-        </div>
-
-        <div style="width:100%;display:flex;justify-content:space-between;margin-top:8px;">
-          <div style="font-size:0.86rem;color:var(--muted)">Model: <strong>Focused / Distracted / Taking A Break</strong></div>
-          <div style="font-size:0.86rem;color:var(--muted)">Local processing</div>
-        </div>
-
-        <div style="margin-top:10px; width:100%;">
-          <div style="font-weight:700;margin-bottom:6px">Sensitivity (Distracted threshold)</div>
-          <div class="slider-row">
-            <input id="sensitivity" type="range" min="0" max="1" step="0.01" value="0.50">
-            <div id="sensitivityVal" style="font-weight:800;width:48px;text-align:center">0.50</div>
-          </div>
-          <div style="font-size:0.82rem;color:var(--muted);margin-top:6px;">If "Distracted" probability rises above this threshold, an alert is triggered.</div>
-        </div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <h2 style="margin:0">Pomodoro Timer</h2>
-          <div style="font-size:0.86rem;color:var(--muted)" id="pomStateLabel">Idle</div>
-        </div>
-
-        <div style="display:flex;gap:12px;margin-top:10px;align-items:center;">
-          <div style="flex:1;">
-            <div style="display:flex;gap:6px;align-items:center;">
-              <label style="font-weight:700;font-size:0.86rem;">Work (min)</label>
-              <input id="workMinutes" type="number" min="1" max="120" value="25" style="width:64px;margin-left:auto">
-            </div>
-            <div style="display:flex;gap:6px;align-items:center;margin-top:6px;">
-              <label style="font-weight:700;font-size:0.86rem;">Break (min)</label>
-              <input id="breakMinutes" type="number" min="1" max="60" value="5" style="width:64px;margin-left:auto">
-            </div>
-
-            <div style="margin-top:10px;">
-              <div style="font-weight:700;">Time left</div>
-              <div style="font-size:1.6rem;font-weight:800;margin-top:6px;" id="pomTimer">25:00</div>
-              <div style="margin-top:8px" class="progress"><div class="bar" id="pomBar" style="width:0%"></div></div>
-            </div>
-          </div>
-
-          <div style="width:130px;display:flex;flex-direction:column;gap:8px;align-items:center;">
-            <button class="btn primary" id="pomStart">Start</button>
-            <button class="btn" id="pomPause" disabled>Pause</button>
-            <button class="btn" id="pomReset">Reset</button>
-          </div>
-        </div>
-
-        <div style="font-size:0.82rem;color:var(--muted);margin-top:8px;">
-          When the Pomodoro is on a break, the tracker will respect break time and will not count distractions.
-        </div>
-      </div>
-
-      <div class="card" style="margin-top:12px;">
-        <h2 style="margin-top:0">Distraction Log (persistent)</h2>
-        <div style="display:flex;gap:8px;margin-top:8px;">
-          <button class="btn" id="downloadCsv">Download CSV</button>
-          <button class="btn" id="clearLog">Clear Log</button>
-          <button class="btn" id="viewToggle">Show latest 10</button>
-        </div>
-
-        <div style="margin-top:10px;max-height:220px;overflow:auto;">
-          <table id="logTable" aria-live="polite" role="log">
-            <thead><tr><th>Timestamp</th><th>Label</th><th>Probability</th></tr></thead>
-            <tbody id="logBody"></tbody>
-          </table>
-        </div>
-      </div>
-
     </div>
 
-    <!-- RIGHT COLUMN: explanatory content -->
-    <div class="content" style="z-index:2">
-      <div class="card">
-        <h2>Short description</h2>
-        <p>
-          Locked-In is a lightweight focus tracker built with Google Teachable Machine (PoseNet). It classifies the user's posture and gaze into <strong>Focused</strong>, <strong>Distracted</strong>, or <strong>Taking A Break</strong>. The tracker runs locally in your browser and provides audible and visual alerts when distraction is detected (based on your sensitivity setting).
-        </p>
-      </div>
+    <!-- RIGHT PANEL – TIMER, LOG, MODE INFO  -->
+    <div id="right-panel" style="flex: 1;">
+        <h2 class="hud-glow">Productivity Suite</h2>
 
-      <div class="card">
-        <h2>How the model works</h2>
-        <p>
-          The model extracts body keypoints (head, shoulders, etc.) using PoseNet and classifies the pose pattern into one of three labels. The highest-probability class determines the live state. You can tune the sensitivity slider to adjust how confidently "Distracted" must be detected before an alert is triggered.
-        </p>
-      </div>
+        <!-- ------------------ TIMER ------------------ -->
+        <h3>Pomodoro Timer</h3>
+        <div id="timer-display">25:00</div>
+        <button onclick="startTimer()">Start</button>
+        <button onclick="resetTimer()">Reset</button>
 
-      <div class="card">
-        <h2>What to try</h2>
-        <ol style="margin:8px 0 0 18px;color:var(--muted);">
-          <li>Click <strong>Start</strong> and allow webcam access.</li>
-          <li>Sit with good posture and look at the screen to register <strong>Focused</strong>.</li>
-          <li>Look away / slouch to test <strong>Distracted</strong> — if probability > sensitivity you’ll get an alert and a log entry.</li>
-          <li>Use Pomodoro: start a work timer — breaks are detected as breaks and won't be logged as distractions.</li>
-          <li>Download your distraction CSV to review stats later.</li>
-        </ol>
-      </div>
-
-      <div class="card">
-        <h2>Privacy & safety</h2>
-        <p>
-          All processing happens locally in your browser. No webcam footage is uploaded. You can stop the webcam at any time with the <strong>Stop</strong> button or close the page to end processing.
-        </p>
-      </div>
-
+        <!-- ------------------ LOG ------------------ -->
+        <h3>Distraction Log</h3>
+        <div id="log-box"></div>
+        <button onclick="downloadLog()">Download CSV</button>
     </div>
-  </div>
+</div>
+
+<!-- -------------------------
+     AUDIO ALERT
+     ------------------------- -->
+<audio id="alert-sound">
+    <source src="data:audio/wav;base64,UklGRoABAABXQVZFZm10IBAAAAABAAEARKwAABCxAgAEABAAZGF0YUABAAAAAACAgICAgICAgICAgICAf4CAf4KAgICAgICAgH+Af4CAgICAgICAgICAgICAgICAgICAgICAgICAgICAg" type="audio/wav">
+</audio>
+
+<!-- -------------------------
+     TEACHABLE MACHINE + JS
+     ------------------------- -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
 
 <script>
-/* -------------------------
-   Configuration & Constants
-   ------------------------- */
-const MODEL_URL = "./my_model/";
-const CLASS_LABELS = ["Focused","Distracted","Taking A Break"]; // exact labels
-const DEFAULT_SENSITIVITY = 0.50; // probability threshold
-const ALERT_COOLDOWN_MS = 4000; // cooldown between alert sounds
-const SIZE = 320;
-
-/* -------------------------
-   State variables
-   ------------------------- */
+// ---------------------------------------------------------------
+// MODEL SETUP (unchanged except for hooks)
+// ---------------------------------------------------------------
+const URL = "./my_model/";
 let model, webcam, ctx, labelContainer, maxPredictions;
-let isRunning = false;
-let lastAlert = 0;
-let distractedEvents = 0;
-let sessionStart = null;
-let mute = false;
-let rafId = null;
 
-let log = []; // persistent log of distraction events — saved to localStorage
+let currentClass = "Focused";
+let sensitivity = 0.5;
+let distractionLog = [];
 
-/* Pomodoro state */
-let pom = {
-  running: false,
-  isBreak: false,
-  workMin: 25,
-  breakMin: 5,
-  remainingSec: 25*60,
-  timerId: null,
-  paused: false
+// arcade beep-boop sound
+const alertSound = document.getElementById("alert-sound");
+
+// sensitivity slider
+document.getElementById("sensitivity-slider").oninput = function() {
+    sensitivity = parseFloat(this.value);
+    document.getElementById("sensitivity-read").innerText = sensitivity.toFixed(2);
 };
 
-/* -------------------------
-   DOM refs
-   ------------------------- */
-const startBtn = document.getElementById("startBtn");
-const stopBtn = document.getElementById("stopBtn");
-const muteBtn = document.getElementById("muteBtn");
-const stateText = document.getElementById("stateText");
-const stateDesc = document.getElementById("stateDesc");
-const indicator = document.getElementById("indicator");
-const root = document.getElementById("root");
-const distractedCount = document.getElementById("distractedCount");
-const sessionTime = document.getElementById("sessionTime");
-const pulse = document.getElementById("pulse"); // not present here; kept for compatibility
-const labelContainerDiv = document.getElementById("label-container");
+// ---------------------------------------------------------------
+// TIMER
+// ---------------------------------------------------------------
+let timeLeft = 25 * 60;
+let timerInterval = null;
 
-const sensitivityEl = document.getElementById("sensitivity");
-const sensitivityVal = document.getElementById("sensitivityVal");
-
-const downloadCsvBtn = document.getElementById("downloadCsv");
-const clearLogBtn = document.getElementById("clearLog");
-const viewToggleBtn = document.getElementById("viewToggle");
-const logBody = document.getElementById("logBody");
-
-const workMinutes = document.getElementById("workMinutes");
-const breakMinutes = document.getElementById("breakMinutes");
-const pomStart = document.getElementById("pomStart");
-const pomPause = document.getElementById("pomPause");
-const pomReset = document.getElementById("pomReset");
-const pomTimer = document.getElementById("pomTimer");
-const pomBar = document.getElementById("pomBar");
-const pomStateLabel = document.getElementById("pomStateLabel");
-
-const ringPath = document.getElementById("ringPath");
-const ringLabel = document.getElementById("ringLabel");
-const focusBar = document.getElementById("focusBar");
-
-/* -------------------------
-   Load persistent state
-   ------------------------- */
-function loadPersistent() {
-  try {
-    const raw = localStorage.getItem('lockedin_log');
-    if (raw) log = JSON.parse(raw) || [];
-    const s = localStorage.getItem('lockedin_sensitivity');
-    if (s !== null) {
-      sensitivityEl.value = parseFloat(s);
-      sensitivityVal.textContent = parseFloat(s).toFixed(2);
-    } else {
-      sensitivityEl.value = DEFAULT_SENSITIVITY;
-      sensitivityVal.textContent = DEFAULT_SENSITIVITY.toFixed(2);
-    }
-    const c = localStorage.getItem('lockedin_distractedCount');
-    if (c) distractedEvents = parseInt(c);
-    distractedCount.textContent = `Distracted events: ${distractedEvents}`;
-    // Pomodoro persistent defaults
-    const w = localStorage.getItem('lockedin_pom_work');
-    const b = localStorage.getItem('lockedin_pom_break');
-    if (w) workMinutes.value = w;
-    if (b) breakMinutes.value = b;
-  } catch(e) {
-    console.warn("Failed to load persistent data",e);
-  }
-}
-loadPersistent();
-renderLog();
-
-/* -------------------------
-   WebAudio alert tone
-   ------------------------- */
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-function playAlertTone(){
-  if (mute) return;
-  const now = audioCtx.currentTime;
-  const o1 = audioCtx.createOscillator();
-  const o2 = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o1.type = 'sine'; o2.type = 'sine';
-  o1.frequency.setValueAtTime(880, now);
-  o2.frequency.setValueAtTime(660, now);
-  g.gain.setValueAtTime(0.0001, now);
-  g.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
-  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
-  o1.connect(g); o2.connect(g); g.connect(audioCtx.destination);
-  o1.start(now); o2.start(now);
-  o1.stop(now + 0.35); o2.stop(now + 0.35);
+function updateTimerDisplay() {
+    const m = Math.floor(timeLeft / 60);
+    const s = timeLeft % 60;
+    document.getElementById("timer-display").innerText =
+        `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-/* -------------------------
-   Start / Stop handlers
-   ------------------------- */
-startBtn.addEventListener('click', () => {
-  init().catch(err => {
-    console.error(err);
-    alert("Failed to start webcam or model. Check console for details.");
-  });
-});
-stopBtn.addEventListener('click', stop);
-muteBtn.addEventListener('click', () => {
-  mute = !mute;
-  muteBtn.textContent = mute ? "🔇 Alert: Off" : "🔊 Alert: On";
-});
-
-/* -------------------------
-   Sensitivity slider
-   ------------------------- */
-sensitivityEl.addEventListener('input', (e) => {
-  const v = parseFloat(e.target.value);
-  sensitivityVal.textContent = v.toFixed(2);
-  localStorage.setItem('lockedin_sensitivity', v.toString());
-});
-
-/* -------------------------
-   CSV log functions
-   ------------------------- */
-function saveLog() {
-  try {
-    localStorage.setItem('lockedin_log', JSON.stringify(log));
-    localStorage.setItem('lockedin_distractedCount', distractedEvents.toString());
-  } catch(e) { console.warn("Failed to save log",e);}
+function startTimer() {
+    if (timerInterval) return;
+    timerInterval = setInterval(() => {
+        timeLeft--;
+        updateTimerDisplay();
+        if (timeLeft <= 0) resetTimer();
+    }, 1000);
 }
 
-function addLogEntry(label, prob) {
-  const ts = new Date().toISOString();
-  const entry = {timestamp: ts, label, probability: prob.toFixed(2)};
-  log.push(entry);
-  saveLog();
-  distractedEvents++;
-  distractedCount.textContent = `Distracted events: ${distractedEvents}`;
-  saveLog();
-  renderLog();
+function resetTimer() {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    timeLeft = 25 * 60;
+    updateTimerDisplay();
 }
 
-function renderLog(latestOnly = true) {
-  logBody.innerHTML = '';
-  const items = latestOnly ? log.slice(-10).reverse() : [...log].reverse();
-  for (const entry of items) {
-    const tr = document.createElement('tr');
-    const td1 = document.createElement('td'); td1.textContent = entry.timestamp;
-    const td2 = document.createElement('td'); td2.textContent = entry.label;
-    const td3 = document.createElement('td'); td3.textContent = entry.probability;
-    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
-    logBody.appendChild(tr);
-  }
+// ---------------------------------------------------------------
+// DISTRACTION LOG
+// ---------------------------------------------------------------
+function logDistraction() {
+    const ts = new Date().toLocaleString();
+    distractionLog.push(ts);
+    const box = document.getElementById("log-box");
+    box.innerHTML += `<div>Distraction @ ${ts}</div>`;
 }
 
-/* download CSV */
-downloadCsvBtn.addEventListener('click', () => {
-  if (!log.length) { alert("No log entries to download."); return; }
-  const header = ["timestamp","label","probability"];
-  const rows = log.map(e => [e.timestamp, e.label, e.probability]);
-  const csv = [header.join(','), ...rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(','))].join('\n');
-  const blob = new Blob([csv], {type: 'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `lockedin_log_${(new Date()).toISOString().slice(0,19).replace(/[:T]/g,'_')}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-});
-
-/* clear log */
-clearLogBtn.addEventListener('click', () => {
-  if (!confirm("Clear the distraction log? This will remove all saved entries.")) return;
-  log = [];
-  distractedEvents = 0;
-  distractedCount.textContent = `Distracted events: ${distractedEvents}`;
-  saveLog();
-  renderLog();
-});
-
-/* toggle view */
-let showingLatest = true;
-viewToggleBtn.addEventListener('click', () => {
-  showingLatest = !showingLatest;
-  viewToggleBtn.textContent = showingLatest ? "Show latest 10" : "Show all";
-  renderLog(showingLatest);
-});
-
-/* -------------------------
-   Pomodoro functions
-   ------------------------- */
-function updatePomDisplay() {
-  const mm = Math.floor(pom.remainingSec / 60);
-  const ss = pom.remainingSec % 60;
-  pomTimer.textContent = `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
-  const total = (pom.isBreak ? (pom.breakMin*60) : (pom.workMin*60));
-  const pct = Math.max(0, Math.min(1, (1 - (pom.remainingSec/total))));
-  pomBar.style.width = `${(pct*100).toFixed(1)}%`;
+function downloadLog() {
+    const csv = "timestamp\n" + distractionLog.join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "distractions.csv";
+    a.click();
 }
 
-function startPom() {
-  pom.workMin = parseInt(workMinutes.value) || 25;
-  pom.breakMin = parseInt(breakMinutes.value) || 5;
-  localStorage.setItem('lockedin_pom_work', pom.workMin);
-  localStorage.setItem('lockedin_pom_break', pom.breakMin);
-
-  if (!pom.running) {
-    pom.running = true;
-    pom.paused = false;
-    pom.isBreak = false;
-    pom.remainingSec = pom.workMin*60;
-    pom.timerId = setInterval(pomTick, 1000);
-    pomStateLabel.textContent = 'Work';
-    pomStart.disabled = true; pomPause.disabled = false;
-    updatePomDisplay();
-  }
-}
-
-function pomTick() {
-  if (pom.paused) return;
-  if (pom.remainingSec > 0) {
-    pom.remainingSec--;
-    updatePomDisplay();
-  } else {
-    // switch state
-    if (!pom.isBreak) {
-      // enter break
-      pom.isBreak = true;
-      pom.remainingSec = pom.breakMin*60;
-      pomStateLabel.textContent = 'Break';
-      // visual feedback
-      updateStateUI("ON BREAK", "Pomodoro break — relax!", "break");
-    } else {
-      // completed break -> new work
-      pom.isBreak = false;
-      pom.remainingSec = pom.workMin*60;
-      pomStateLabel.textContent = 'Work';
-      updateStateUI("FOCUSED", "Pomodoro work session started.", "focused");
-    }
-    updatePomDisplay();
-  }
-}
-
-function pausePom() {
-  if (!pom.running) return;
-  pom.paused = !pom.paused;
-  pomPause.textContent = pom.paused ? "Resume" : "Pause";
-  pomStateLabel.textContent = pom.paused ? 'Paused' : (pom.isBreak ? 'Break' : 'Work');
-}
-
-function resetPom() {
-  if (pom.timerId) clearInterval(pom.timerId);
-  pom = { running:false, isBreak:false, workMin: parseInt(workMinutes.value)||25, breakMin: parseInt(breakMinutes.value)||5, remainingSec: parseInt(workMinutes.value||25)*60, timerId:null, paused:false };
-  pomStart.disabled = false; pomPause.disabled = true; pomPause.textContent = "Pause";
-  pomStateLabel.textContent = 'Idle';
-  updatePomDisplay();
-  updateStateUI("READY", "Click Start and allow camera access.", "focused");
-}
-
-/* Pom controls */
-pomStart.addEventListener('click', () => { startPom(); });
-pomPause.addEventListener('click', () => { pausePom(); });
-pomReset.addEventListener('click', () => { if (confirm("Reset Pomodoro?")) resetPom(); });
-
-/* initialize pom on load */
-resetPom();
-
-/* -------------------------
-   Teachable Machine setup
-   ------------------------- */
-startBtn.disabled = false;
+// ---------------------------------------------------------------
+// TEACHABLE MACHINE LOGIC
+// ---------------------------------------------------------------
 async function init() {
-  if (isRunning) return;
-  startBtn.disabled = true;
-  startBtn.textContent = "Loading model...";
+    const modelURL = URL + "model.json";
+    const metadataURL = URL + "metadata.json";
 
-  const modelURL = MODEL_URL + "model.json";
-  const metadataURL = MODEL_URL + "metadata.json";
-  model = await tmPose.load(modelURL, metadataURL);
-  maxPredictions = model.getTotalClasses();
+    model = await tmPose.load(modelURL, metadataURL);
+    maxPredictions = model.getTotalClasses();
 
-  webcam = new tmPose.Webcam(SIZE, SIZE, true);
-  await webcam.setup();
-  await webcam.play();
+    const size = 200;
+    webcam = new tmPose.Webcam(size, size, true);
+    await webcam.setup();
+    await webcam.play();
+    window.requestAnimationFrame(loop);
 
-  const canvas = document.getElementById('canvas');
-  canvas.width = SIZE; canvas.height = SIZE;
-  ctx = canvas.getContext('2d');
+    const canvas = document.getElementById("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    ctx = canvas.getContext("2d");
 
-  // labels
-  labelContainerDiv.innerHTML = '';
-  for (let i = 0; i < maxPredictions; i++) {
-    const d = document.createElement('div');
-    d.textContent = `${i < CLASS_LABELS.length ? CLASS_LABELS[i] : "Class " + (i+1)}: 0.00`;
-    labelContainerDiv.appendChild(d);
-  }
-  labelContainer = labelContainerDiv.childNodes;
-
-  // run
-  isRunning = true;
-  startBtn.textContent = "Running";
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-  sessionStart = Date.now();
-  rafId = requestAnimationFrame(loop);
-}
-
-/* Stop processing */
-function stop() {
-  if (!isRunning) return;
-  isRunning = false;
-  startBtn.disabled = false;
-  startBtn.textContent = "Start";
-  stopBtn.disabled = true;
-  if (webcam) {
-    try { webcam.stop(); } catch(e) {}
-  }
-  if (rafId) cancelAnimationFrame(rafId);
-  sessionStart = null;
-  updateStateUI("STOPPED", "Camera stopped. Click Start to run.", "focused");
-}
-
-/* Main loop */
-async function loop() {
-  if (!isRunning) return;
-  webcam.update();
-  await predict();
-  if (sessionStart) {
-    const s = Math.floor((Date.now() - sessionStart) / 1000);
-    sessionTime.textContent = "Session: " + s + "s";
-  }
-  rafId = requestAnimationFrame(loop);
-}
-
-/* Prediction & logic */
-async function predict() {
-  const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
-  const prediction = await model.predict(posenetOutput);
-
-  // update labels
-  for (let i = 0; i < maxPredictions; i++) {
-    const name = (prediction[i] && prediction[i].className) ? prediction[i].className : ("Class " + (i+1));
-    const prob = (prediction[i] && prediction[i].probability) ? prediction[i].probability : 0;
-    labelContainer[i].innerHTML = `${name}: ${prob.toFixed(2)}`;
-  }
-
-  // choose top
-  let top = prediction.reduce((a,b) => (a.probability > b.probability ? a : b), prediction[0]);
-  if (!top) return;
-  const label = top.className;
-  const prob = top.probability;
-
-  // compute progress (simple focus% = prob of Focused)
-  const focusedProb = prediction.find(p => p.className === "Focused");
-  const focusedPct = focusedProb ? (focusedProb.probability * 100) : 0;
-  focusBar.style.width = `${Math.min(100, focusedPct).toFixed(1)}%`;
-  ringPath.setAttribute('stroke-dasharray', `${Math.floor(focusedPct)},100`);
-  ringLabel.textContent = `${Math.round(focusedPct)}%`;
-
-  // Pomodoro: if currently in break, prefer break UI and do not log distractions
-  if (pom.running && pom.isBreak) {
-    // set break state and skip distracted counting
-    updateStateUI("ON BREAK", "Pomodoro break — relax!", "break");
-    drawPose(pose);
-    return;
-  }
-
-  // Sensitivity threshold
-  const thresh = parseFloat(sensitivityEl.value) || DEFAULT_SENSITIVITY;
-
-  if (label === "Focused") {
-    updateStateUI("FOCUSED", "You're locked in. Keep going.", "focused");
-  } else if (label === "Distracted") {
-    updateStateUI("DISTRACTED", "Heads up — you might be distracted.", "distracted");
-    // only trigger if probability above threshold
-    if (prob >= thresh) {
-      const now = Date.now();
-      if (now - lastAlert > ALERT_COOLDOWN_MS) {
-        lastAlert = now;
-        addLogEntry(label, prob);
-        playAlertTone();
-      }
+    labelContainer = document.getElementById("label-container");
+    for (let i = 0; i < maxPredictions; i++) {
+        labelContainer.appendChild(document.createElement("div"));
     }
-  } else if (label === "Taking A Break") {
-    updateStateUI("ON BREAK", "Detected break posture — nice rest.", "break");
-  } else {
-    updateStateUI(label.toUpperCase(), "Model says: " + label, "focused");
-  }
-
-  drawPose(pose);
 }
 
-/* Draw pose */
+async function loop() {
+    webcam.update();
+    await predict();
+    window.requestAnimationFrame(loop);
+}
+
+async function predict() {
+    const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+    const prediction = await model.predict(posenetOutput);
+
+    let highest = { name: "", prob: 0 };
+
+    for (let i = 0; i < maxPredictions; i++) {
+        const p = prediction[i];
+        labelContainer.childNodes[i].innerHTML = `${p.className}: ${p.probability.toFixed(2)}`;
+
+        if (p.probability > highest.prob) highest = { name: p.className, prob: p.probability };
+    }
+
+    // threshold filtering
+    if (highest.prob > sensitivity && highest.name !== currentClass) {
+        currentClass = highest.name;
+
+        if (currentClass === "Distracted") {
+            alertSound.play();
+            logDistraction();
+        }
+    }
+
+    drawPose(pose);
+}
+
 function drawPose(pose) {
-  if (!webcam || !webcam.canvas) return;
-  ctx.drawImage(webcam.canvas, 0, 0, SIZE, SIZE);
-  if (pose) {
-    const minPartConfidence = 0.5;
-    tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx);
-    tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx);
-  }
+    if (webcam.canvas) {
+        ctx.drawImage(webcam.canvas, 0, 0);
+        if (pose) {
+            tmPose.drawKeypoints(pose.keypoints, 0.5, ctx);
+            tmPose.drawSkeleton(pose.keypoints, 0.5, ctx);
+        }
+    }
 }
-
-/* -------------------------
-   UI update helpers
-   ------------------------- */
-function updateStateUI(text, desc, state = "focused") {
-  stateText.textContent = text;
-  stateDesc.textContent = desc;
-
-  root.classList.remove('state-focused','state-distracted','state-break');
-  indicator.classList.remove('indicator-focused','indicator-distracted','indicator-break');
-
-  if (state === 'distracted') {
-    root.classList.add('state-distracted');
-    indicator.classList.add('indicator-distracted');
-    indicator.style.color = getComputedStyle(document.documentElement).getPropertyValue('--distracted-red').trim() || '#ff3b3b';
-    // subtle shake
-    applyShake();
-  } else if (state === 'break') {
-    root.classList.add('state-break');
-    indicator.classList.add('indicator-break');
-    indicator.style.color = getComputedStyle(document.documentElement).getPropertyValue('--break-green').trim() || '#2be37b';
-  } else {
-    root.classList.add('state-focused');
-    indicator.classList.add('indicator-focused');
-    indicator.style.color = getComputedStyle(document.documentElement).getPropertyValue('--focus-blue').trim() || '#17a2ff';
-  }
-
-  // change accent variable
-  const accent = state === 'distracted' ? getComputedStyle(document.documentElement).getPropertyValue('--distracted-red') : (state === 'break' ? getComputedStyle(document.documentElement).getPropertyValue('--break-green') : getComputedStyle(document.documentElement).getPropertyValue('--focus-blue'));
-  document.documentElement.style.setProperty('--accent', accent);
-
-  // update ring color
-  ringPath.style.stroke = accent;
-
-  // subtle transform pop
-  indicator.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.06)' }, { transform: 'scale(1)' }], { duration: 420, easing:'ease-out' });
-}
-
-/* small shake effect */
-function applyShake(){
-  const el = document.querySelector('.container');
-  if (!el) return;
-  el.animate([
-    { transform: 'translateX(0px)' },
-    { transform: 'translateX(-6px)' },
-    { transform: 'translateX(4px)' },
-    { transform: 'translateX(0px)' }
-  ], { duration: 420, iterations: 1 });
-}
-
-/* -------------------------
-   Clean up
-   ------------------------- */
-window.addEventListener('beforeunload', () => { stop(); });
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    // conserve CPU if desired: pause predictive loop by stopping webcam updates (optional)
-  }
-});
-
-/* -------------------------
-   Render initial UI values
-   ------------------------- */
-sensitivityVal.textContent = parseFloat(sensitivityEl.value).toFixed(2);
-distractedCount.textContent = `Distracted events: ${distractedEvents}`;
-renderLog(true);
-
-/* -------------------------
-   Expose some test helpers (optional in console)
-   ------------------------- */
-window.lockedIn = {
-  addLogEntry,
-  renderLog,
-  resetPom
-};
 </script>
 </body>
 </html>
